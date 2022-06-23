@@ -1,0 +1,25 @@
+[package]
+name = "nix-cpio-generator"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Dump a Nix's closure as CPIOs"
+documentation = "https://github.com/DeterminateSystems/nix-cpio-generator/"
+homepage = "https://github.com/DeterminateSystems/nix-cpio-generator/"
+repository = "https://github.com/DeterminateSystems/nix-cpio-generator/"
+
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bytes = "1.1.0"
+cpio = "0.2.2"
+futures = "0.3.16"
+lazy_static = "1.4.0"
+log = "0.4.14"
+tempfile = "3.2.0"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1.7", features = [ "io-util" ] }
+tokio-util = { version = "0.6.7", features = [ "io" ] }
+walkdir = "2"
+zstd = "0.11"
