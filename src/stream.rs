@@ -11,7 +11,7 @@ use crate::nix::get_closure_paths;
 
 
 pub async fn stream(
-    cpio_cache: &mut CpioCache,
+    cpio_cache: &CpioCache,
     store_path: &Path,
 ) -> Result<
     (
