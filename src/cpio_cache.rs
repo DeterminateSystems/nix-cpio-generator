@@ -8,6 +8,7 @@ use tempfile::NamedTempFile;
 use tokio::fs::File;
 use tokio::io::BufReader;
 use tokio_util::io::ReaderStream;
+use tokio::sync::Semaphore;
 
 use crate::cpio::{make_archive_from_dir, make_registration};
 
@@ -15,13 +16,15 @@ use crate::cpio::{make_archive_from_dir, make_registration};
 pub struct CpioCache {
     cache_dir: PathBuf,
     cache: Arc<RwLock<HashMap<PathBuf, Cpio>>>,
+    semaphore: Arc<Semaphore>,
 }
 
 impl CpioCache {
-    pub fn new(cache_dir: PathBuf) -> Result<Self, String> {
+    pub fn new(cache_dir: PathBuf, parallelism: usize) -> Result<Self, String> {
         Ok(Self {
             cache: Arc::new(RwLock::new(HashMap::new())),
             cache_dir,
+            semaphore: Arc::new(Semaphore::new(parallelism)),
         })
     }
 
@@ -66,6 +69,10 @@ impl CpioCache {
     }
 
     async fn make_cpio(&self, path: &Path) -> Result<Cpio, CpioError> {
+        trace!("Waiting for the semaphore ...");
+        let _semaphore = self.semaphore.acquire().await.map_err(CpioError::Semaphore)?;
+        trace!("Got for the semaphore ...");
+
         let final_dest = self.cache_path(&path)?;
         let temp_dest = NamedTempFile::new_in(&self.cache_dir).map_err(|e| CpioError::Io {
             ctx: "Creating a new named temporary file.",
@@ -203,4 +210,5 @@ pub enum CpioError {
     },
     RegistrationError(crate::cpio::MakeRegistrationError),
     Uncachable(String),
+    Semaphore(tokio::sync::AcquireError),
 }
