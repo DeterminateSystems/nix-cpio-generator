@@ -100,6 +100,15 @@ impl CpioCache {
                 e,
             })?;
 
+        compressor.include_checksum(true).map_err(|e| {
+            CpioError::Io {
+                ctx: "Including checksums",
+                src: insidepath.clone(),
+                dest: insidedest.clone(),
+                e,
+            }
+        })?;
+
         let mut compressor = tokio::task::spawn_blocking(move || -> Result<_, CpioError> {
             make_archive_from_dir(Path::new("/"), &insidepath, &mut compressor).map_err(|e| {
                 CpioError::Io {
