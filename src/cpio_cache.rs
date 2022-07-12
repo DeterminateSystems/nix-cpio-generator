@@ -16,15 +16,15 @@ use crate::cpio::{make_archive_from_dir, make_registration};
 pub struct CpioCache {
     cache_dir: PathBuf,
     cache: Arc<RwLock<HashMap<PathBuf, Cpio>>>,
-    semaphore: Arc<Semaphore>,
+    semaphore: Option<Arc<Semaphore>>,
 }
 
 impl CpioCache {
-    pub fn new(cache_dir: PathBuf, parallelism: usize) -> Result<Self, String> {
+    pub fn new(cache_dir: PathBuf, parallelism: Option<usize>) -> Result<Self, String> {
         Ok(Self {
             cache: Arc::new(RwLock::new(HashMap::new())),
             cache_dir,
-            semaphore: Arc::new(Semaphore::new(parallelism)),
+            semaphore: parallelism.map(|cap| Arc::new(Semaphore::new(cap))),
         })
     }
 
@@ -69,9 +69,14 @@ impl CpioCache {
     }
 
     async fn make_cpio(&self, path: &Path) -> Result<Cpio, CpioError> {
-        trace!("Waiting for the semaphore ...");
-        let _semaphore = self.semaphore.acquire().await.map_err(CpioError::Semaphore)?;
-        trace!("Got for the semaphore ...");
+        let _semaphore = if let Some(sem) = &self.semaphore {
+            trace!("Waiting for the semaphore ...");
+            let taken = Some(sem.acquire().await.map_err(CpioError::Semaphore)?);
+            trace!("Got for the semaphore ...");
+            taken
+        } else {
+            None
+        };
 
         let final_dest = self.cache_path(&path)?;
         let temp_dest = NamedTempFile::new_in(&self.cache_dir).map_err(|e| CpioError::Io {
