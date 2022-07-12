@@ -158,7 +158,7 @@ pub enum MakeRegistrationError {
     FilenameInvalidUtf8,
 }
 
-pub fn make_load_cpio(paths: &Vec<PathBuf>) -> Result<Vec<u8>, LoadCpioError> {
+pub fn make_load_cpio(paths: &[PathBuf]) -> Result<Vec<u8>, LoadCpioError> {
     let script = paths
         .iter()
         .map(|p| {
