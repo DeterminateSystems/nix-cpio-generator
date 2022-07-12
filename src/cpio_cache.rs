@@ -7,8 +7,8 @@ use log::{info, trace};
 use tempfile::NamedTempFile;
 use tokio::fs::File;
 use tokio::io::BufReader;
-use tokio_util::io::ReaderStream;
 use tokio::sync::Semaphore;
+use tokio_util::io::ReaderStream;
 
 use crate::cpio::{make_archive_from_dir, make_registration};
 
@@ -105,14 +105,14 @@ impl CpioCache {
                 e,
             })?;
 
-        compressor.include_checksum(true).map_err(|e| {
-            CpioError::Io {
+        compressor
+            .include_checksum(true)
+            .map_err(|e| CpioError::Io {
                 ctx: "Including checksums",
                 src: insidepath.clone(),
                 dest: insidedest.clone(),
                 e,
-            }
-        })?;
+            })?;
 
         let mut compressor = tokio::task::spawn_blocking(move || -> Result<_, CpioError> {
             make_archive_from_dir(Path::new("/"), &insidepath, &mut compressor).map_err(|e| {

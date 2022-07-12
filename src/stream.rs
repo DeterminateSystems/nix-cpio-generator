@@ -9,7 +9,6 @@ use crate::cpio::{make_load_cpio, LEADER_CPIO_BYTES, LEADER_CPIO_LEN};
 use crate::cpio_cache::CpioCache;
 use crate::nix::get_closure_paths;
 
-
 pub async fn stream(
     cpio_cache: &CpioCache,
     store_path: &Path,
