@@ -21,14 +21,14 @@ pub async fn stream(
 > {
     info!("Sending closure: {:?}", &store_path);
 
-    let closure_paths = get_closure_paths(&store_path).await.map_err(|e| {
+    let closure_paths = get_closure_paths(store_path).await.map_err(|e| {
         warn!("Error calculating closure for {:?}: {:?}", store_path, e);
         panic!();
     })?;
 
     let mut cpio_makers = closure_paths
-        .to_owned()
-        .into_iter()
+        .iter()
+        .cloned()
         .map(|path| cpio_cache.dump_cpio(path))
         .collect::<FuturesUnordered<_>>();
 
@@ -54,10 +54,10 @@ pub async fn stream(
     for cpio in readers.into_iter() {
         streams.push(async {
             trace!("Handing over the reader for {:?}", cpio.path());
-            Ok::<_, std::io::Error>(cpio.reader_stream().await.map_err(|e| {
+            cpio.reader_stream().await.map_err(|e| {
                 error!("Failed to get a reader stream: {:?}", e);
                 e
-            })?)
+            })
         });
     }
 
