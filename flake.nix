@@ -31,6 +31,7 @@
           file
           nixpkgs-fmt
           rustfmt
+          clippy
           vim # xxd
           cpiotools.packages.${system}.package
           cargo
