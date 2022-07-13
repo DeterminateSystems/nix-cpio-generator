@@ -206,7 +206,7 @@ pub enum LoadCpioError {
     #[error("A general IO error")]
     Io(std::io::Error),
 
-    #[error("the path appears to not have a base name?")]
+    #[error("The path doesn't appear to have a base name")]
     NoBasename(PathBuf),
 }
 

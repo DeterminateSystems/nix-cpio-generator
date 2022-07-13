@@ -228,7 +228,7 @@ pub enum CpioError {
     RegistrationError(crate::cpio::MakeRegistrationError),
 
     #[error(
-        "the path we tried to generate a cache for can't turn in to a cache key for some reason"
+        "The path we tried to generate a cache for can't turn in to a cache key for some reason"
     )]
     Uncachable(String),
 
