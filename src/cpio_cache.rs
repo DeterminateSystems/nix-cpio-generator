@@ -214,15 +214,24 @@ impl Cpio {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum CpioError {
+    #[error("An IO error")]
     Io {
         ctx: &'static str,
         src: PathBuf,
         dest: PathBuf,
         e: std::io::Error,
     },
+
+    #[error("Generating the Nix DB registration failed")]
     RegistrationError(crate::cpio::MakeRegistrationError),
+
+    #[error(
+        "The path we tried to generate a cache for can't turn in to a cache key for some reason"
+    )]
     Uncachable(String),
+
+    #[error("failed to acquire a semaphore")]
     Semaphore(tokio::sync::AcquireError),
 }

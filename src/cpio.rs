@@ -149,12 +149,23 @@ where
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum MakeRegistrationError {
+    #[error("Executing a command failed")]
     Exec(std::io::Error),
+
+    #[error("Generating the registration data failed")]
     DumpDb(Vec<u8>),
+
+    #[error("An ambiguous IO error")]
     Io(std::io::Error),
+
+    #[error("The path submitted appears to have no filename")]
     NoFilename,
+
+    #[error(
+        "The path submitted doesn't seem to be UTF-8, even though Nix probably guarantees this"
+    )]
     FilenameInvalidUtf8,
 }
 
@@ -190,9 +201,12 @@ pub fn make_load_cpio(paths: &[PathBuf]) -> Result<Vec<u8>, LoadCpioError> {
     Ok(loader.into_inner())
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum LoadCpioError {
+    #[error("A general IO error")]
     Io(std::io::Error),
+
+    #[error("The path doesn't appear to have a base name")]
     NoBasename(PathBuf),
 }
 
