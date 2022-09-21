@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use log::{info, trace};
 use tempfile::NamedTempFile;
-use tokio::fs::File;
+use tokio::fs::{self, File};
 use tokio::io::BufReader;
 use tokio::sync::Semaphore;
 use tokio_util::io::ReaderStream;
@@ -166,7 +166,6 @@ impl CpioCache {
 
 pub struct Cpio {
     size: u64,
-    file: Option<File>,
     path: PathBuf,
 }
 
@@ -174,7 +173,6 @@ impl Clone for Cpio {
     fn clone(&self) -> Self {
         Cpio {
             size: self.size,
-            file: None,
             path: self.path.clone(),
         }
     }
@@ -182,12 +180,10 @@ impl Clone for Cpio {
 
 impl Cpio {
     pub async fn new(path: PathBuf) -> std::io::Result<Self> {
-        let file = File::open(&path).await?;
-        let metadata = file.metadata().await?;
+        let metadata = fs::metadata(&path).await?;
 
         Ok(Self {
             size: metadata.len(),
-            file: Some(file),
             path,
         })
     }
@@ -207,10 +203,7 @@ impl Cpio {
     }
 
     async fn handle(&mut self) -> std::io::Result<tokio::fs::File> {
-        match self.file.take() {
-            Some(handle) => Ok(handle),
-            None => Ok(File::open(&self.path).await?),
-        }
+        File::open(&self.path).await
     }
 }
 
