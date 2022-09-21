@@ -67,6 +67,7 @@ impl CpioCache {
                 e,
             })?;
 
+        // TODO: pushing should check against the max size and `pop_lru` if it's too large?
         self.cache
             .write()
             .expect("Failed to get a write lock on the cpio cache")
