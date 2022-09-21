@@ -1,9 +1,10 @@
-use std::collections::HashMap;
 use std::ffi::OsString;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use log::{info, trace};
+use lru::LruCache;
 use tempfile::NamedTempFile;
 use tokio::fs::{self, File};
 use tokio::io::BufReader;
@@ -15,14 +16,20 @@ use crate::cpio::{make_archive_from_dir, make_registration};
 #[derive(Clone)]
 pub struct CpioCache {
     cache_dir: PathBuf,
-    cache: Arc<RwLock<HashMap<PathBuf, Cpio>>>,
+    // TODO: turn into LRU, delete file once it falls out
+    cache: Arc<RwLock<LruCache<PathBuf, Cpio>>>,
     semaphore: Option<Arc<Semaphore>>,
 }
 
 impl CpioCache {
     pub fn new(cache_dir: PathBuf, parallelism: Option<usize>) -> Result<Self, String> {
+        // TODO: enumerate cache dir and put into LRU
+        // TODO: if size of all files > MAX_CACHE, evict whatever until it's smaller than that by some epsilon
+
         Ok(Self {
-            cache: Arc::new(RwLock::new(HashMap::new())),
+            // FIXME: size should not be just 1 entry lol -- maybe it should be unbounded, since
+            // we'll handle sizing stuff ourselves?
+            cache: Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(1).unwrap()))),
             cache_dir,
             semaphore: parallelism.map(|cap| Arc::new(Semaphore::new(cap))),
         })
@@ -45,7 +52,10 @@ impl CpioCache {
         self.cache
             .read()
             .expect("Failed to get a read lock on the cpio cache")
-            .get(path)
+            // FIXME: it's really obnoxious to use `.get` because it needs to be mutable.........
+            // but that also means that this means the LRU... doesn't actually keep track of when
+            // things were "recently used" :')
+            .peek(&path.to_path_buf())
             .cloned()
     }
 
@@ -63,7 +73,7 @@ impl CpioCache {
         self.cache
             .write()
             .expect("Failed to get a write lock on the cpio cache")
-            .insert(path.to_path_buf(), cpio.clone());
+            .push(path.to_path_buf(), cpio.clone());
 
         Ok(cpio)
     }
