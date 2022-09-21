@@ -50,12 +50,9 @@ impl CpioCache {
 
     fn get_cached(&self, path: &Path) -> Option<Cpio> {
         self.cache
-            .read()
-            .expect("Failed to get a read lock on the cpio cache")
-            // FIXME: it's really obnoxious to use `.get` because it needs to be mutable.........
-            // but that also means that this means the LRU... doesn't actually keep track of when
-            // things were "recently used" :')
-            .peek(&path.to_path_buf())
+            .write()
+            .expect("Failed to get a write lock on the cpio cache (for LRU updating)")
+            .get(&path.to_path_buf())
             .cloned()
     }
 
