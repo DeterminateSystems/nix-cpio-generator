@@ -1,5 +1,4 @@
 use std::ffi::OsString;
-use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
@@ -27,9 +26,8 @@ impl CpioCache {
         // TODO: if size of all files > MAX_CACHE, evict whatever until it's smaller than that by some epsilon
 
         Ok(Self {
-            // FIXME: size should not be just 1 entry lol -- maybe it should be unbounded, since
-            // we'll handle sizing stuff ourselves?
-            cache: Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(1).unwrap()))),
+            // FIXME: still need to handle the unbounded stuff
+            cache: Arc::new(RwLock::new(LruCache::unbounded())),
             cache_dir,
             semaphore: parallelism.map(|cap| Arc::new(Semaphore::new(cap))),
         })
