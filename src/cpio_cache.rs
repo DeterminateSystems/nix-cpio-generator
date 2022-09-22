@@ -56,6 +56,9 @@ impl CpioCache {
             .write()
             .expect("Failed to get a write lock on the cpio cache (for LRU updating)")
             .get(&path.to_path_buf())
+            .filter(|cpio| {
+                cpio.path.exists() && cpio.path.is_file() && std::fs::File::open(&cpio.path).is_ok()
+            })
             .cloned()
     }
 
