@@ -99,6 +99,7 @@ impl CpioCache {
             }
         }
 
+        // TODO: add cpio size to current_size
         self.cache
             .write()
             .expect("Failed to get a write lock on the cpio cache")
