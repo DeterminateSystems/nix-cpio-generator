@@ -15,30 +15,83 @@ use crate::cpio::{make_archive_from_dir, make_registration};
 #[derive(Clone)]
 pub struct CpioCache {
     cache_dir: PathBuf,
-    // TODO: turn into LRU, delete file once it falls out
-    cache: Arc<RwLock<LruCache<PathBuf, Cpio>>>,
+    cache: Arc<RwLock<CpioLruCache>>,
     semaphore: Option<Arc<Semaphore>>,
-    current_size_in_bytes: Arc<RwLock<u64>>,
+}
+
+struct CpioLruCache {
+    // TODO: turn into LRU, delete file once it falls out
+    lru_cache: LruCache<PathBuf, Cpio>,
+    current_size_in_bytes: u64,
     max_size_in_bytes: u64,
 }
 
+impl CpioLruCache {
+    pub fn new(max_size_in_bytes: u64) -> Self {
+        Self {
+            lru_cache: LruCache::unbounded(),
+            // FIXME: implement current size, max size
+            current_size_in_bytes: 0,
+            max_size_in_bytes,
+        }
+    }
+
+    fn prune_lru(&mut self) -> Result<(), CpioError> {
+        if let Some((path, cpio)) = self.lru_cache.pop_lru() {
+            std::fs::remove_file(&path).map_err(|e| CpioError::Io {
+                ctx: "Removing the LRU CPIO",
+                src: path.to_path_buf(),
+                dest: path.to_path_buf(),
+                e,
+            })?;
+
+            self.current_size_in_bytes -= cpio.size;
+        }
+
+        Ok(())
+    }
+
+    fn push(&mut self, path: PathBuf, cpio: Cpio) -> anyhow::Result<()> {
+        while cpio.size + self.current_size_in_bytes > self.max_size_in_bytes {
+            self.prune_lru()?;
+        }
+
+        if let Some((_path, cpio)) = self.lru_cache.push(path, cpio) {
+            self.current_size_in_bytes -= cpio.size;
+        }
+
+        Ok(())
+    }
+}
 impl CpioCache {
-    pub fn new(cache_dir: PathBuf, parallelism: Option<usize>) -> Result<Self, String> {
+    pub fn new(cache_dir: PathBuf, parallelism: Option<usize>) -> anyhow::Result<Self> {
+        let cache = Arc::new(RwLock::new(CpioLruCache::new(0))); // FIXME: max size should be provided
+
         // TODO: enumerate cache dir and put into LRU
-        // TODO: if size of all files > MAX_CACHE, evict whatever until it's smaller than that by some epsilon
+
+        let epsilon = 2 * 1024 * 1024 * 1024; // 2 GiB
+        loop {
+            let cache_read = cache
+                .read()
+                .expect("Failed to get read lock on the cpio cache");
+            if cache_read.current_size_in_bytes > cache_read.max_size_in_bytes + epsilon {
+                cache
+                    .write()
+                    .expect("Failed to get write lock on the cpio cache")
+                    .prune_lru()?;
+            } else {
+                break;
+            }
+        }
 
         Ok(Self {
-            // FIXME: still need to handle the unbounded stuff
-            cache: Arc::new(RwLock::new(LruCache::unbounded())),
+            cache,
             cache_dir,
             semaphore: parallelism.map(|cap| Arc::new(Semaphore::new(cap))),
-            // FIXME: implement current size, max size
-            current_size_in_bytes: Arc::new(RwLock::new(0)),
-            max_size_in_bytes: 0,
         })
     }
 
-    pub async fn dump_cpio(&self, path: PathBuf) -> Result<Cpio, CpioError> {
+    pub async fn dump_cpio(&self, path: PathBuf) -> anyhow::Result<Cpio> {
         if let Some(cpio) = self.get_cached(&path) {
             trace!("Found CPIO in the memory cache {:?}", path);
             Ok(cpio)
@@ -55,6 +108,7 @@ impl CpioCache {
         self.cache
             .write()
             .expect("Failed to get a write lock on the cpio cache (for LRU updating)")
+            .lru_cache
             .get(&path.to_path_buf())
             .filter(|cpio| {
                 cpio.path.exists() && cpio.path.is_file() && std::fs::File::open(&cpio.path).is_ok()
@@ -62,7 +116,7 @@ impl CpioCache {
             .cloned()
     }
 
-    async fn get_directory_cached(&self, path: &Path) -> Result<Cpio, CpioError> {
+    async fn get_directory_cached(&self, path: &Path) -> anyhow::Result<Cpio> {
         let cached_location = self.cache_path(path)?;
         let cpio = Cpio::new(cached_location.clone())
             .await
@@ -73,42 +127,15 @@ impl CpioCache {
                 e,
             })?;
 
-        let current_size_in_bytes = self
-            .current_size_in_bytes
-            .read()
-            .expect("Failed to get read lock on the cpio cache size");
-        if cpio.size + *current_size_in_bytes > self.max_size_in_bytes {
-            if let Some((path, cpio)) = self
-                .cache
-                .write()
-                .expect("Failed to get a write lock on the cpio cache")
-                .pop_lru()
-            {
-                let mut current_size_in_bytes = self
-                    .current_size_in_bytes
-                    .write()
-                    .expect("Failed to get write lock on the cpio cache size");
-
-                fs::remove_file(&path).await.map_err(|e| CpioError::Io {
-                    ctx: "Removing the LRU CPIO",
-                    src: path.to_path_buf(),
-                    dest: path.to_path_buf(),
-                    e,
-                })?;
-                *current_size_in_bytes -= cpio.size;
-            }
-        }
-
-        // TODO: add cpio size to current_size
         self.cache
             .write()
             .expect("Failed to get a write lock on the cpio cache")
-            .push(path.to_path_buf(), cpio.clone());
+            .push(path.to_path_buf(), cpio.clone())?;
 
         Ok(cpio)
     }
 
-    async fn make_cpio(&self, path: &Path) -> Result<Cpio, CpioError> {
+    async fn make_cpio(&self, path: &Path) -> anyhow::Result<Cpio> {
         let _semaphore = if let Some(sem) = &self.semaphore {
             trace!("Waiting for the semaphore ...");
             let taken = Some(sem.acquire().await.map_err(CpioError::Semaphore)?);
