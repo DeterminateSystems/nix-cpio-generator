@@ -18,6 +18,8 @@ pub struct CpioCache {
     // TODO: turn into LRU, delete file once it falls out
     cache: Arc<RwLock<LruCache<PathBuf, Cpio>>>,
     semaphore: Option<Arc<Semaphore>>,
+    current_size_in_bytes: Arc<RwLock<u64>>,
+    max_size_in_bytes: u64,
 }
 
 impl CpioCache {
@@ -30,6 +32,9 @@ impl CpioCache {
             cache: Arc::new(RwLock::new(LruCache::unbounded())),
             cache_dir,
             semaphore: parallelism.map(|cap| Arc::new(Semaphore::new(cap))),
+            // FIXME: implement current size, max size
+            current_size_in_bytes: Arc::new(RwLock::new(0)),
+            max_size_in_bytes: 0,
         })
     }
 
@@ -65,7 +70,32 @@ impl CpioCache {
                 e,
             })?;
 
-        // TODO: pushing should check against the max size and `pop_lru` if it's too large?
+        let current_size_in_bytes = self
+            .current_size_in_bytes
+            .read()
+            .expect("Failed to get read lock on the cpio cache size");
+        if cpio.size + *current_size_in_bytes > self.max_size_in_bytes {
+            if let Some((path, cpio)) = self
+                .cache
+                .write()
+                .expect("Failed to get a write lock on the cpio cache")
+                .pop_lru()
+            {
+                let mut current_size_in_bytes = self
+                    .current_size_in_bytes
+                    .write()
+                    .expect("Failed to get write lock on the cpio cache size");
+
+                fs::remove_file(&path).await.map_err(|e| CpioError::Io {
+                    ctx: "Removing the LRU CPIO",
+                    src: path.to_path_buf(),
+                    dest: path.to_path_buf(),
+                    e,
+                })?;
+                *current_size_in_bytes -= cpio.size;
+            }
+        }
+
         self.cache
             .write()
             .expect("Failed to get a write lock on the cpio cache")
