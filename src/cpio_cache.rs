@@ -92,7 +92,7 @@ impl CpioCache {
     }
 
     pub async fn dump_cpio(&self, path: PathBuf) -> anyhow::Result<Cpio> {
-        if let Some(cpio) = self.get_cached(&path) {
+        if let Some(cpio) = self.get_cached(&path)? {
             trace!("Found CPIO in the memory cache {:?}", path);
             Ok(cpio)
         } else if let Ok(cpio) = self.get_directory_cached(&path).await {
@@ -104,16 +104,31 @@ impl CpioCache {
         }
     }
 
-    fn get_cached(&self, path: &Path) -> Option<Cpio> {
-        self.cache
+    fn get_cached(&self, path: &Path) -> anyhow::Result<Option<Cpio>> {
+        let mut cache_write = self
+            .cache
             .write()
-            .expect("Failed to get a write lock on the cpio cache (for LRU updating)")
-            .lru_cache
-            .get(&path.to_path_buf())
-            .filter(|cpio| {
-                cpio.path.exists() && cpio.path.is_file() && std::fs::File::open(&cpio.path).is_ok()
-            })
-            .cloned()
+            .expect("Failed to get a write lock on the cpio cache (for LRU updating)");
+        let path_buf = path.to_path_buf();
+        let cpio = cache_write.lru_cache.get(&path_buf);
+
+        let cpio = match cpio {
+            Some(cpio) => {
+                if cpio.path.exists()
+                    && cpio.path.is_file()
+                    && std::fs::File::open(&cpio.path).is_ok()
+                {
+                    Some(cpio)
+                } else {
+                    cache_write.lru_cache.demote(&path_buf);
+                    cache_write.prune_lru()?;
+                    None
+                }
+            }
+            None => None,
+        };
+
+        Ok(cpio.cloned())
     }
 
     async fn get_directory_cached(&self, path: &Path) -> anyhow::Result<Cpio> {
