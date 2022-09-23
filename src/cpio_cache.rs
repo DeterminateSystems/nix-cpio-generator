@@ -51,6 +51,18 @@ impl CpioLruCache {
         Ok(())
     }
 
+    fn prune_lru(&mut self) -> anyhow::Result<()> {
+        loop {
+            if self.current_size_in_bytes > self.max_size_in_bytes + SIZE_EPSILON_BYTES {
+                self.prune_single_lru()?;
+            } else {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
     fn push(&mut self, path: PathBuf, cpio: Cpio) -> anyhow::Result<()> {
         let cpio_size = cpio.size;
 
@@ -106,23 +118,15 @@ impl CpioCache {
             let cache_read = cache
                 .read()
                 .expect("Failed to get read lock on the cpio cache");
+
             log::info!(
                 "attempting to prune lru cache to be less than max size {} bytes (currently {} bytes)",
                 cache_read.max_size_in_bytes, cache_read.current_size_in_bytes
             );
-
-            loop {
-                if cache_read.current_size_in_bytes
-                    > cache_read.max_size_in_bytes + SIZE_EPSILON_BYTES
-                {
-                    cache
-                        .write()
-                        .expect("Failed to get write lock on the cpio cache")
-                        .prune_single_lru()?;
-                } else {
-                    break;
-                }
-            }
+            cache
+                .write()
+                .expect("Failed to get write lock on the cpio cache")
+                .prune_lru()?;
         }
 
         Ok(Self {
