@@ -52,13 +52,17 @@ impl CpioLruCache {
     }
 
     fn push(&mut self, path: PathBuf, cpio: Cpio) -> anyhow::Result<()> {
-        while cpio.size + self.current_size_in_bytes > self.max_size_in_bytes {
+        let cpio_size = cpio.size;
+
+        while cpio_size + self.current_size_in_bytes > self.max_size_in_bytes {
             self.prune_lru()?;
         }
 
         if let Some((_path, replaced_cpio)) = self.lru_cache.push(path, cpio) {
             self.current_size_in_bytes -= replaced_cpio.size;
         }
+
+        self.current_size_in_bytes += cpio_size;
 
         Ok(())
     }
