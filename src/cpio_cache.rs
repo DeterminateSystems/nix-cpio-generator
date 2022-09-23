@@ -56,8 +56,8 @@ impl CpioLruCache {
             self.prune_lru()?;
         }
 
-        if let Some((_path, cpio)) = self.lru_cache.push(path, cpio) {
-            self.current_size_in_bytes -= cpio.size;
+        if let Some((_path, replaced_cpio)) = self.lru_cache.push(path, cpio) {
+            self.current_size_in_bytes -= replaced_cpio.size;
         }
 
         Ok(())
