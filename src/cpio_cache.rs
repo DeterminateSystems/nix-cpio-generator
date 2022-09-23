@@ -22,7 +22,6 @@ pub struct CpioCache {
 }
 
 struct CpioLruCache {
-    // TODO: turn into LRU, delete file once it falls out
     lru_cache: LruCache<PathBuf, Cpio>,
     current_size_in_bytes: u64,
     max_size_in_bytes: u64,
@@ -32,7 +31,6 @@ impl CpioLruCache {
     fn new(max_size_in_bytes: u64) -> Self {
         Self {
             lru_cache: LruCache::unbounded(),
-            // FIXME: implement current size, max size
             current_size_in_bytes: 0,
             max_size_in_bytes,
         }
@@ -77,6 +75,7 @@ impl CpioLruCache {
         self.lru_cache.demote(path)
     }
 }
+
 impl CpioCache {
     pub fn new(
         cache_dir: PathBuf,
@@ -89,7 +88,7 @@ impl CpioCache {
         {
             let mut cache_write = cache
                 .write()
-                .expect("Failed  to get write lock on the cpio cache");
+                .expect("Failed to get write lock on the cpio cache");
 
             for entry in std::fs::read_dir(&cache_dir)? {
                 let entry = entry?;
