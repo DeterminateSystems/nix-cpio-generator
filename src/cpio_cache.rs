@@ -12,6 +12,8 @@ use tokio_util::io::ReaderStream;
 
 use crate::cpio::{make_archive_from_dir, make_registration};
 
+pub const SIZE_EPSILON_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2 GiB
+
 #[derive(Clone)]
 pub struct CpioCache {
     cache_dir: PathBuf,
@@ -102,7 +104,6 @@ impl CpioCache {
         }
 
         {
-            let epsilon = 2 * 1024 * 1024 * 1024; // 2 GiB
             let cache_read = cache
                 .read()
                 .expect("Failed to get read lock on the cpio cache");
@@ -112,7 +113,9 @@ impl CpioCache {
             );
 
             loop {
-                if cache_read.current_size_in_bytes > cache_read.max_size_in_bytes + epsilon {
+                if cache_read.current_size_in_bytes
+                    > cache_read.max_size_in_bytes + SIZE_EPSILON_BYTES
+                {
                     cache
                         .write()
                         .expect("Failed to get write lock on the cpio cache")
