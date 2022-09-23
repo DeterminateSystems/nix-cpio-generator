@@ -27,7 +27,7 @@ struct CpioLruCache {
 }
 
 impl CpioLruCache {
-    pub fn new(max_size_in_bytes: u64) -> Self {
+    fn new(max_size_in_bytes: u64) -> Self {
         Self {
             lru_cache: LruCache::unbounded(),
             // FIXME: implement current size, max size
@@ -65,6 +65,14 @@ impl CpioLruCache {
         self.current_size_in_bytes += cpio_size;
 
         Ok(())
+    }
+
+    fn get(&mut self, path: &PathBuf) -> Option<&Cpio> {
+        self.lru_cache.get(path)
+    }
+
+    fn demote(&mut self, path: &PathBuf) {
+        self.lru_cache.demote(path)
     }
 }
 impl CpioCache {
@@ -114,7 +122,7 @@ impl CpioCache {
             .write()
             .expect("Failed to get a write lock on the cpio cache (for LRU updating)");
         let path_buf = path.to_path_buf();
-        let cpio = cache_write.lru_cache.get(&path_buf);
+        let cpio = cache_write.get(&path_buf);
 
         let cpio = match cpio {
             Some(cpio) => {
@@ -124,7 +132,7 @@ impl CpioCache {
                 {
                     Some(cpio)
                 } else {
-                    cache_write.lru_cache.demote(&path_buf);
+                    cache_write.demote(&path_buf);
                     cache_write.prune_lru()?;
                     None
                 }
