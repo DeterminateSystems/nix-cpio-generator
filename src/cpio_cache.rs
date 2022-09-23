@@ -81,18 +81,21 @@ impl CpioCache {
 
         // TODO: enumerate cache dir and put into LRU
 
-        let epsilon = 2 * 1024 * 1024 * 1024; // 2 GiB
-        loop {
+        {
+            let epsilon = 2 * 1024 * 1024 * 1024; // 2 GiB
             let cache_read = cache
                 .read()
                 .expect("Failed to get read lock on the cpio cache");
-            if cache_read.current_size_in_bytes > cache_read.max_size_in_bytes + epsilon {
-                cache
-                    .write()
-                    .expect("Failed to get write lock on the cpio cache")
-                    .prune_lru()?;
-            } else {
-                break;
+
+            loop {
+                if cache_read.current_size_in_bytes > cache_read.max_size_in_bytes + epsilon {
+                    cache
+                        .write()
+                        .expect("Failed to get write lock on the cpio cache")
+                        .prune_single_lru()?;
+                } else {
+                    break;
+                }
             }
         }
 
