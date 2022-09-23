@@ -79,7 +79,23 @@ impl CpioCache {
     pub fn new(cache_dir: PathBuf, parallelism: Option<usize>) -> anyhow::Result<Self> {
         let cache = Arc::new(RwLock::new(CpioLruCache::new(0))); // FIXME: max size should be provided
 
-        // TODO: enumerate cache dir and put into LRU
+        log::info!("enumerating cache dir {:?} to place into lru", cache_dir);
+        {
+            let mut cache_write = cache
+                .write()
+                .expect("Failed  to get write lock on the cpio cache");
+
+            for entry in std::fs::read_dir(&cache_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_dir() {
+                    log::warn!("{:?} was a directory but it shouldn't be", path);
+                } else {
+                    let cpio = Cpio::new(path.clone())?;
+                    cache_write.push(path, cpio)?;
+                }
+            }
+        }
 
         {
             let epsilon = 2 * 1024 * 1024 * 1024; // 2 GiB
