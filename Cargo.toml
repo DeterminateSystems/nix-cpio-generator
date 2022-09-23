@@ -12,7 +12,6 @@ repository = "https://github.com/DeterminateSystems/nix-cpio-generator/"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.65"
 bytes = "1.1.0"
 cpio = "0.2.2"
 futures = "0.3.16"
