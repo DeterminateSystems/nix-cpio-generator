@@ -76,8 +76,12 @@ impl CpioLruCache {
     }
 }
 impl CpioCache {
-    pub fn new(cache_dir: PathBuf, parallelism: Option<usize>) -> anyhow::Result<Self> {
-        let cache = Arc::new(RwLock::new(CpioLruCache::new(0))); // FIXME: max size should be provided
+    pub fn new(
+        cache_dir: PathBuf,
+        parallelism: Option<usize>,
+        max_cache_size_in_bytes: u64,
+    ) -> anyhow::Result<Self> {
+        let cache = Arc::new(RwLock::new(CpioLruCache::new(max_cache_size_in_bytes)));
 
         log::info!("enumerating cache dir {:?} to place into lru", cache_dir);
         {

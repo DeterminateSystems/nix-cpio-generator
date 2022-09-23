@@ -16,9 +16,12 @@ async fn main() {
         .await
         .unwrap();
 
-    let mut cpiocache =
-        nix_cpio_generator::cpio_cache::CpioCache::new(scratch.path().to_path_buf(), Some(threads))
-            .unwrap();
+    let mut cpiocache = nix_cpio_generator::cpio_cache::CpioCache::new(
+        scratch.path().to_path_buf(),
+        Some(threads),
+        1_000_000,
+    )
+    .unwrap();
     let (size, stream) = nix_cpio_generator::stream::stream(&mut cpiocache, Path::new(&src))
         .await
         .unwrap();
