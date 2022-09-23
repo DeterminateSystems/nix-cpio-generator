@@ -36,7 +36,7 @@ impl CpioLruCache {
         }
     }
 
-    fn prune_lru(&mut self) -> Result<(), CpioError> {
+    fn prune_single_lru(&mut self) -> Result<(), CpioError> {
         if let Some((path, cpio)) = self.lru_cache.pop_lru() {
             std::fs::remove_file(&path).map_err(|e| CpioError::Io {
                 ctx: "Removing the LRU CPIO",
@@ -55,7 +55,7 @@ impl CpioLruCache {
         let cpio_size = cpio.size;
 
         while cpio_size + self.current_size_in_bytes > self.max_size_in_bytes {
-            self.prune_lru()?;
+            self.prune_single_lru()?;
         }
 
         if let Some((_path, replaced_cpio)) = self.lru_cache.push(path, cpio) {
@@ -133,7 +133,7 @@ impl CpioCache {
                     Some(cpio)
                 } else {
                     cache_write.demote(&path_buf);
-                    cache_write.prune_lru()?;
+                    cache_write.prune_single_lru()?;
                     None
                 }
             }
