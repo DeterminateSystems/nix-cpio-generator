@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 use log::{info, trace};
 use lru::LruCache;
 use tempfile::NamedTempFile;
-use tokio::fs::{self, File};
+use tokio::fs::File;
 use tokio::io::BufReader;
 use tokio::sync::Semaphore;
 use tokio_util::io::ReaderStream;
@@ -148,14 +148,12 @@ impl CpioCache {
 
     async fn get_directory_cached(&self, path: &Path) -> anyhow::Result<Cpio> {
         let cached_location = self.cache_path(path)?;
-        let cpio = Cpio::new(cached_location.clone())
-            .await
-            .map_err(|e| CpioError::Io {
-                ctx: "Loading a cached CPIO",
-                src: path.to_path_buf(),
-                dest: cached_location,
-                e,
-            })?;
+        let cpio = Cpio::new(cached_location.clone()).map_err(|e| CpioError::Io {
+            ctx: "Loading a cached CPIO",
+            src: path.to_path_buf(),
+            dest: cached_location,
+            e,
+        })?;
 
         self.cache
             .write()
@@ -276,8 +274,8 @@ impl Clone for Cpio {
 }
 
 impl Cpio {
-    pub async fn new(path: PathBuf) -> std::io::Result<Self> {
-        let metadata = fs::metadata(&path).await?;
+    pub fn new(path: PathBuf) -> std::io::Result<Self> {
+        let metadata = std::fs::metadata(&path)?;
 
         Ok(Self {
             size: metadata.len(),
