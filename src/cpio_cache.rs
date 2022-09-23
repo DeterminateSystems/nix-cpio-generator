@@ -40,8 +40,8 @@ impl CpioLruCache {
         if let Some((path, cpio)) = self.lru_cache.pop_lru() {
             std::fs::remove_file(&path).map_err(|e| CpioError::Io {
                 ctx: "Removing the LRU CPIO",
-                src: path.to_path_buf(),
-                dest: path.to_path_buf(),
+                src: None,
+                dest: Some(path.to_path_buf()),
                 e,
             })?;
 
@@ -51,7 +51,7 @@ impl CpioLruCache {
         Ok(())
     }
 
-    fn prune_lru(&mut self) -> anyhow::Result<()> {
+    fn prune_lru(&mut self) -> Result<(), CpioError> {
         loop {
             if self.current_size_in_bytes > self.max_size_in_bytes + SIZE_EPSILON_BYTES {
                 self.prune_single_lru()?;
@@ -63,7 +63,7 @@ impl CpioLruCache {
         Ok(())
     }
 
-    fn push(&mut self, path: PathBuf, cpio: Cpio) -> anyhow::Result<()> {
+    fn push(&mut self, path: PathBuf, cpio: Cpio) -> Result<(), CpioError> {
         let cpio_size = cpio.size;
 
         while cpio_size + self.current_size_in_bytes > self.max_size_in_bytes {
@@ -93,7 +93,7 @@ impl CpioCache {
         cache_dir: PathBuf,
         parallelism: Option<usize>,
         max_cache_size_in_bytes: u64,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, CpioError> {
         let cache = Arc::new(RwLock::new(CpioLruCache::new(max_cache_size_in_bytes)));
 
         log::info!("enumerating cache dir {:?} to place into lru", cache_dir);
@@ -102,9 +102,20 @@ impl CpioCache {
                 .write()
                 .expect("Failed to get write lock on the cpio cache");
 
-            for entry in std::fs::read_dir(&cache_dir)? {
-                let entry = entry?;
+            for entry in std::fs::read_dir(&cache_dir).map_err(|e| CpioError::Io {
+                ctx: "Reading the cache dir",
+                src: None,
+                dest: Some(cache_dir.clone()),
+                e,
+            })? {
+                let entry = entry.map_err(|e| CpioError::Io {
+                    ctx: "Reading cache dir entry",
+                    src: None,
+                    dest: None,
+                    e,
+                })?;
                 let path = entry.path();
+
                 if path.is_dir() {
                     log::warn!("{:?} was a directory but it shouldn't be", path);
                 } else {
@@ -136,7 +147,7 @@ impl CpioCache {
         })
     }
 
-    pub async fn dump_cpio(&self, path: PathBuf) -> anyhow::Result<Cpio> {
+    pub async fn dump_cpio(&self, path: PathBuf) -> Result<Cpio, CpioError> {
         if let Some(cpio) = self.get_cached(&path)? {
             trace!("Found CPIO in the memory cache {:?}", path);
             Ok(cpio)
@@ -149,7 +160,7 @@ impl CpioCache {
         }
     }
 
-    fn get_cached(&self, path: &Path) -> anyhow::Result<Option<Cpio>> {
+    fn get_cached(&self, path: &Path) -> Result<Option<Cpio>, CpioError> {
         let mut cache_write = self
             .cache
             .write()
@@ -176,14 +187,9 @@ impl CpioCache {
         Ok(cpio.cloned())
     }
 
-    async fn get_directory_cached(&self, path: &Path) -> anyhow::Result<Cpio> {
+    async fn get_directory_cached(&self, path: &Path) -> Result<Cpio, CpioError> {
         let cached_location = self.cache_path(path)?;
-        let cpio = Cpio::new(cached_location.clone()).map_err(|e| CpioError::Io {
-            ctx: "Loading a cached CPIO",
-            src: path.to_path_buf(),
-            dest: cached_location,
-            e,
-        })?;
+        let cpio = Cpio::new(cached_location.clone())?;
 
         self.cache
             .write()
@@ -193,7 +199,7 @@ impl CpioCache {
         Ok(cpio)
     }
 
-    async fn make_cpio(&self, path: &Path) -> anyhow::Result<Cpio> {
+    async fn make_cpio(&self, path: &Path) -> Result<Cpio, CpioError> {
         let _semaphore = if let Some(sem) = &self.semaphore {
             trace!("Waiting for the semaphore ...");
             let taken = Some(sem.acquire().await.map_err(CpioError::Semaphore)?);
@@ -206,8 +212,8 @@ impl CpioCache {
         let final_dest = self.cache_path(path)?;
         let temp_dest = NamedTempFile::new_in(&self.cache_dir).map_err(|e| CpioError::Io {
             ctx: "Creating a new named temporary file.",
-            src: path.to_path_buf(),
-            dest: final_dest.clone(),
+            src: Some(path.to_path_buf()),
+            dest: Some(final_dest.clone()),
             e,
         })?;
 
@@ -225,8 +231,8 @@ impl CpioCache {
         let mut compressor =
             zstd::stream::write::Encoder::new(tdf, 10).map_err(|e| CpioError::Io {
                 ctx: "Instantiating the zstd write-stream encoder",
-                src: insidepath.clone(),
-                dest: insidedest.clone(),
+                src: Some(insidepath.clone()),
+                dest: Some(insidedest.clone()),
                 e,
             })?;
 
@@ -234,8 +240,8 @@ impl CpioCache {
             .include_checksum(true)
             .map_err(|e| CpioError::Io {
                 ctx: "Including checksums",
-                src: insidepath.clone(),
-                dest: insidedest.clone(),
+                src: Some(insidepath.clone()),
+                dest: Some(insidedest.clone()),
                 e,
             })?;
 
@@ -243,8 +249,8 @@ impl CpioCache {
             make_archive_from_dir(Path::new("/"), &insidepath, &mut compressor).map_err(|e| {
                 CpioError::Io {
                     ctx: "Constructing a CPIO",
-                    src: insidepath,
-                    dest: insidedest,
+                    src: Some(insidepath),
+                    dest: Some(insidedest),
                     e,
                 }
             })?;
@@ -259,15 +265,15 @@ impl CpioCache {
             .map_err(CpioError::RegistrationError)?;
         compressor.finish().map_err(|e| CpioError::Io {
             ctx: "Finishing the zstd write-stream encoder",
-            src: path.to_path_buf(),
-            dest: temp_dest.path().to_path_buf(),
+            src: Some(path.to_path_buf()),
+            dest: Some(temp_dest.path().to_path_buf()),
             e,
         })?;
 
         temp_dest.persist(&final_dest).map_err(|e| CpioError::Io {
             ctx: "Persisting the temporary file to the final location.",
-            src: path.to_path_buf(),
-            dest: final_dest.clone(),
+            src: Some(path.to_path_buf()),
+            dest: Some(final_dest.clone()),
             e: e.error,
         })?;
 
@@ -304,8 +310,13 @@ impl Clone for Cpio {
 }
 
 impl Cpio {
-    pub fn new(path: PathBuf) -> std::io::Result<Self> {
-        let metadata = std::fs::metadata(&path)?;
+    pub fn new(path: PathBuf) -> Result<Self, CpioError> {
+        let metadata = std::fs::metadata(&path).map_err(|e| CpioError::Io {
+            ctx: "Reading the CPIO's file metadata",
+            src: None,
+            dest: Some(path.to_path_buf()),
+            e,
+        })?;
 
         Ok(Self {
             size: metadata.len(),
@@ -337,8 +348,8 @@ pub enum CpioError {
     #[error("An IO error")]
     Io {
         ctx: &'static str,
-        src: PathBuf,
-        dest: PathBuf,
+        src: Option<PathBuf>,
+        dest: Option<PathBuf>,
         e: std::io::Error,
     },
 
