@@ -92,53 +92,41 @@ impl CpioCache {
         parallelism: Option<usize>,
         max_cache_size_in_bytes: u64,
     ) -> Result<Self, CpioError> {
-        let cache = Arc::new(RwLock::new(CpioLruCache::new(max_cache_size_in_bytes)));
+        let mut cache = CpioLruCache::new(max_cache_size_in_bytes);
 
         log::info!("enumerating cache dir {:?} to place into lru", cache_dir);
-        {
-            let mut cache_write = cache
-                .write()
-                .expect("Failed to get write lock on the cpio cache");
-
-            for entry in std::fs::read_dir(&cache_dir).map_err(|e| CpioError::Io {
-                ctx: "Reading the cache dir",
+        for entry in std::fs::read_dir(&cache_dir).map_err(|e| CpioError::Io {
+            ctx: "Reading the cache dir",
+            src: None,
+            dest: Some(cache_dir.clone()),
+            e,
+        })? {
+            let entry = entry.map_err(|e| CpioError::Io {
+                ctx: "Reading cache dir entry",
                 src: None,
-                dest: Some(cache_dir.clone()),
+                dest: None,
                 e,
-            })? {
-                let entry = entry.map_err(|e| CpioError::Io {
-                    ctx: "Reading cache dir entry",
-                    src: None,
-                    dest: None,
-                    e,
-                })?;
-                let path = entry.path();
+            })?;
+            let path = entry.path();
 
-                if path.is_dir() {
-                    log::warn!("{:?} was a directory but it shouldn't be", path);
-                } else {
-                    let cached_location = CachedPathBuf::new_preexisting(path.to_path_buf());
-                    let cpio = Cpio::new(cached_location)?;
-                    cache_write.push(path, cpio)?;
-                }
+            if path.is_dir() {
+                log::warn!("{:?} was a directory but it shouldn't be", path);
+            } else {
+                let cached_location = CachedPathBuf::new_preexisting(path.to_path_buf());
+                let cpio = Cpio::new(cached_location)?;
+                cache.push(path, cpio)?;
             }
         }
 
-        {
-            let mut cache_write = cache
-                .write()
-                .expect("Failed to get write lock on the cpio cache");
-
-            log::info!(
-                "attempting to prune lru cache to be less than max size {} bytes (currently {} bytes)",
-                cache_write.max_size_in_bytes, cache_write.current_size_in_bytes
-            );
-
-            cache_write.prune_lru()?;
-        }
+        log::info!(
+            "attempting to prune lru cache to be less than max size {} bytes (currently {} bytes)",
+            cache.max_size_in_bytes,
+            cache.current_size_in_bytes
+        );
+        cache.prune_lru()?;
 
         Ok(Self {
-            cache,
+            cache: Arc::new(RwLock::new(cache)),
             cache_dir,
             semaphore: parallelism.map(|cap| Arc::new(Semaphore::new(cap))),
         })
