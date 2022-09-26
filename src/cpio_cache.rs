@@ -143,12 +143,14 @@ impl CpioCache {
             }
         }
 
-        log::info!(
-            "attempting to prune lru cache to be less than max size {} bytes (currently {} bytes)",
-            cache.max_size_in_bytes,
-            cache.current_size_in_bytes
-        );
-        cache.prune_lru()?;
+        if cache.current_size_in_bytes > cache.max_size_in_bytes {
+            log::info!(
+                "pruning lru cache to be less than max size {} bytes (currently {} bytes)",
+                cache.max_size_in_bytes,
+                cache.current_size_in_bytes,
+            );
+            cache.prune_lru()?;
+        }
 
         Ok(Self {
             cache: Arc::new(RwLock::new(cache)),
