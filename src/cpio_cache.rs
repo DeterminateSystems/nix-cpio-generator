@@ -21,8 +21,32 @@ pub struct CpioCache {
     semaphore: Option<Arc<Semaphore>>,
 }
 
+#[derive(Debug, Hash, PartialEq, Eq)]
+struct NixStorePath(PathBuf);
+
+impl NixStorePath {
+    pub fn new(store_path: PathBuf) -> Self {
+        assert!(store_path.starts_with("/nix/store"));
+        NixStorePath(store_path)
+    }
+
+    pub fn from_cached(
+        cached_location: &CachedPathBuf,
+        cache_dir: &PathBuf,
+    ) -> Result<Self, CpioError> {
+        let nix_store = PathBuf::from("/nix/store");
+        let stripped = cached_location
+            .0
+            .strip_prefix(cache_dir)
+            .map_err(CpioError::StripCachePrefix)?;
+        let store_hash_path = stripped.with_extension("").with_extension("");
+
+        Ok(NixStorePath(nix_store.join(store_hash_path)))
+    }
+}
+
 struct CpioLruCache {
-    lru_cache: LruCache<PathBuf, Cpio>,
+    lru_cache: LruCache<NixStorePath, Cpio>,
     current_size_in_bytes: u64,
     max_size_in_bytes: u64,
 }
@@ -41,7 +65,7 @@ impl CpioLruCache {
             if cpio.path().exists() {
                 std::fs::remove_file(&cpio.path()).map_err(|e| CpioError::Io {
                     ctx: "Removing the LRU CPIO",
-                    src: Some(path),
+                    src: Some(path.0),
                     dest: Some(cpio.path().to_path_buf()),
                     e,
                 })?;
@@ -61,7 +85,7 @@ impl CpioLruCache {
         Ok(())
     }
 
-    fn push(&mut self, path: PathBuf, cpio: Cpio) -> Result<(), CpioError> {
+    fn push(&mut self, path: NixStorePath, cpio: Cpio) -> Result<(), CpioError> {
         let cpio_size = cpio.size;
 
         while cpio_size + self.current_size_in_bytes > self.max_size_in_bytes {
@@ -77,11 +101,11 @@ impl CpioLruCache {
         Ok(())
     }
 
-    fn get(&mut self, path: &PathBuf) -> Option<&Cpio> {
+    fn get(&mut self, path: &NixStorePath) -> Option<&Cpio> {
         self.lru_cache.get(path)
     }
 
-    fn demote(&mut self, path: &PathBuf) {
+    fn demote(&mut self, path: &NixStorePath) {
         self.lru_cache.demote(path)
     }
 }
@@ -113,8 +137,9 @@ impl CpioCache {
                 log::warn!("{:?} was a directory but it shouldn't be", path);
             } else {
                 let cached_location = CachedPathBuf::new_preexisting(path.to_path_buf());
+                let store_path = NixStorePath::from_cached(&cached_location, &cache_dir)?;
                 let cpio = Cpio::new(cached_location)?;
-                cache.push(path, cpio)?;
+                cache.push(store_path, cpio)?;
             }
         }
 
@@ -147,8 +172,8 @@ impl CpioCache {
             .cache
             .write()
             .expect("Failed to get a write lock on the cpio cache (for LRU updating)");
-        let path_buf = path.to_path_buf();
-        let cpio = cache_write.get(&path_buf);
+        let store_path = NixStorePath::new(path.to_path_buf());
+        let cpio = cache_write.get(&store_path);
 
         let cpio = match cpio {
             Some(cpio) => {
@@ -159,7 +184,7 @@ impl CpioCache {
                 {
                     Some(cpio)
                 } else {
-                    cache_write.demote(&path_buf);
+                    cache_write.demote(&store_path);
                     cache_write.prune_single_lru()?;
                     None
                 }
@@ -250,8 +275,8 @@ impl CpioCache {
                 e: e.error,
             })?;
 
+        let store_path = NixStorePath::new(path.to_path_buf());
         let cached_location = CachedPathBuf::new(path.to_path_buf(), &self.cache_dir)?;
-        let store_path = NixStorePath::from_cached(&cached_location, &self.cache_dir)?;
         let cpio = Cpio::new(cached_location)?;
 
         self.cache
@@ -359,4 +384,7 @@ pub enum CpioError {
 
     #[error("failed to acquire a semaphore")]
     Semaphore(tokio::sync::AcquireError),
+
+    #[error("Failed to strip cache prefix")]
+    StripCachePrefix(std::path::StripPrefixError),
 }
