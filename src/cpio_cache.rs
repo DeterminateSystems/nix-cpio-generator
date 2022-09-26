@@ -126,18 +126,16 @@ impl CpioCache {
         }
 
         {
-            let cache_read = cache
-                .read()
-                .expect("Failed to get read lock on the cpio cache");
+            let mut cache_write = cache
+                .write()
+                .expect("Failed to get write lock on the cpio cache");
 
             log::info!(
                 "attempting to prune lru cache to be less than max size {} bytes (currently {} bytes)",
-                cache_read.max_size_in_bytes, cache_read.current_size_in_bytes
+                cache_write.max_size_in_bytes, cache_write.current_size_in_bytes
             );
-            cache
-                .write()
-                .expect("Failed to get write lock on the cpio cache")
-                .prune_lru()?;
+
+            cache_write.prune_lru()?;
         }
 
         Ok(Self {
