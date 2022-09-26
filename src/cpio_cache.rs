@@ -52,12 +52,8 @@ impl CpioLruCache {
     }
 
     fn prune_lru(&mut self) -> Result<(), CpioError> {
-        loop {
-            if self.current_size_in_bytes > self.max_size_in_bytes + SIZE_EPSILON_BYTES {
-                self.prune_single_lru()?;
-            } else {
-                break;
-            }
+        while self.current_size_in_bytes > self.max_size_in_bytes + SIZE_EPSILON_BYTES {
+            self.prune_single_lru()?;
         }
 
         Ok(())
