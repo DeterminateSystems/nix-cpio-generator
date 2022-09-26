@@ -115,7 +115,8 @@ impl CpioCache {
                 if path.is_dir() {
                     log::warn!("{:?} was a directory but it shouldn't be", path);
                 } else {
-                    let cpio = Cpio::new(path.clone())?;
+                    let cached_location = CachedPathBuf::new_preexisting(path.to_path_buf());
+                    let cpio = Cpio::new(cached_location)?;
                     cache_write.push(path, cpio)?;
                 }
             }
@@ -182,7 +183,7 @@ impl CpioCache {
     }
 
     async fn get_directory_cached(&self, path: &Path) -> Result<Cpio, CpioError> {
-        let cached_location = self.cache_path(path)?;
+        let cached_location = CachedPathBuf::new(path.to_path_buf(), &self.cache_dir)?;
         let cpio = Cpio::new(cached_location.clone())?;
 
         self.cache
@@ -203,11 +204,11 @@ impl CpioCache {
             None
         };
 
-        let final_dest = self.cache_path(path)?;
+        let final_dest = CachedPathBuf::new(path.to_path_buf(), &self.cache_dir)?;
         let temp_dest = NamedTempFile::new_in(&self.cache_dir).map_err(|e| CpioError::Io {
             ctx: "Creating a new named temporary file.",
             src: Some(path.to_path_buf()),
-            dest: Some(final_dest.clone()),
+            dest: Some(final_dest.0.clone()),
             e,
         })?;
 
@@ -264,34 +265,49 @@ impl CpioCache {
             e,
         })?;
 
-        temp_dest.persist(&final_dest).map_err(|e| CpioError::Io {
-            ctx: "Persisting the temporary file to the final location.",
-            src: Some(path.to_path_buf()),
-            dest: Some(final_dest.clone()),
-            e: e.error,
-        })?;
+        temp_dest
+            .persist(&final_dest.0)
+            .map_err(|e| CpioError::Io {
+                ctx: "Persisting the temporary file to the final location.",
+                src: Some(path.to_path_buf()),
+                dest: Some(final_dest.0.clone()),
+                e: e.error,
+            })?;
 
         self.get_directory_cached(path).await
     }
+}
 
-    fn cache_path(&self, src: &Path) -> Result<PathBuf, CpioError> {
-        if let Some(std::path::Component::Normal(pathname)) = src.components().last() {
-            let mut cache_name = OsString::from(pathname);
-            cache_name.push(".cpio.zstd");
+#[derive(Debug, Clone)]
+pub struct CachedPathBuf(PathBuf);
 
-            Ok(self.cache_dir.join(cache_name))
-        } else {
-            Err(CpioError::Uncachable(format!(
-                "Cannot calculate a cache path for: {:?}",
-                src
-            )))
-        }
+impl CachedPathBuf {
+    pub fn new(src: PathBuf, cache_dir: &Path) -> Result<Self, CpioError> {
+        let cached_path =
+            if let Some(std::path::Component::Normal(pathname)) = src.components().last() {
+                let mut cache_name = OsString::from(pathname);
+                cache_name.push(".cpio.zstd");
+
+                Ok(cache_dir.join(cache_name))
+            } else {
+                Err(CpioError::Uncachable(format!(
+                    "Cannot calculate a cache path for: {:?}",
+                    src
+                )))
+            };
+
+        cached_path.map(CachedPathBuf)
+    }
+
+    /// This function assumes the passed PathBuf already exists in the cache.
+    pub fn new_preexisting(src: PathBuf) -> Self {
+        CachedPathBuf(src)
     }
 }
 
 pub struct Cpio {
     size: u64,
-    path: PathBuf,
+    path: CachedPathBuf,
 }
 
 impl Clone for Cpio {
@@ -304,11 +320,11 @@ impl Clone for Cpio {
 }
 
 impl Cpio {
-    pub fn new(path: PathBuf) -> Result<Self, CpioError> {
-        let metadata = std::fs::metadata(&path).map_err(|e| CpioError::Io {
+    pub fn new(path: CachedPathBuf) -> Result<Self, CpioError> {
+        let metadata = std::fs::metadata(&path.0).map_err(|e| CpioError::Io {
             ctx: "Reading the CPIO's file metadata",
             src: None,
-            dest: Some(path.to_path_buf()),
+            dest: Some(path.0.clone()),
             e,
         })?;
 
@@ -323,7 +339,7 @@ impl Cpio {
     }
 
     pub fn path(&self) -> &Path {
-        &self.path
+        &self.path.0
     }
 
     pub async fn reader_stream(
@@ -333,7 +349,7 @@ impl Cpio {
     }
 
     async fn handle(&mut self) -> std::io::Result<tokio::fs::File> {
-        File::open(&self.path).await
+        File::open(&self.path()).await
     }
 }
 
