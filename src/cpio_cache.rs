@@ -38,10 +38,10 @@ impl CpioLruCache {
 
     fn prune_single_lru(&mut self) -> Result<(), CpioError> {
         if let Some((path, cpio)) = self.lru_cache.pop_lru() {
-            std::fs::remove_file(&path).map_err(|e| CpioError::Io {
+            std::fs::remove_file(&cpio.path()).map_err(|e| CpioError::Io {
                 ctx: "Removing the LRU CPIO",
-                src: None,
-                dest: Some(path.to_path_buf()),
+                src: Some(path),
+                dest: Some(cpio.path().to_path_buf()),
                 e,
             })?;
 
@@ -165,9 +165,10 @@ impl CpioCache {
 
         let cpio = match cpio {
             Some(cpio) => {
-                if cpio.path.exists()
-                    && cpio.path.is_file()
-                    && std::fs::File::open(&cpio.path).is_ok()
+                let cpio_path = cpio.path();
+                if cpio_path.exists()
+                    && cpio_path.is_file()
+                    && std::fs::File::open(&cpio_path).is_ok()
                 {
                     Some(cpio)
                 } else {
@@ -305,6 +306,7 @@ impl CachedPathBuf {
     }
 }
 
+#[derive(Debug)]
 pub struct Cpio {
     size: u64,
     path: CachedPathBuf,
