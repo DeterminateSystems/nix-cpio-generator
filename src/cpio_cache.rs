@@ -134,10 +134,7 @@ impl CpioCache {
 
     pub async fn dump_cpio(&self, path: PathBuf) -> Result<Cpio, CpioError> {
         if let Some(cpio) = self.get_cached(&path)? {
-            trace!("Found CPIO in the memory cache {:?}", path);
-            Ok(cpio)
-        } else if let Ok(cpio) = self.get_directory_cached(&path).await {
-            trace!("Found CPIO in the directory cache {:?}", path);
+            trace!("Found CPIO in the cache {:?}", path);
             Ok(cpio)
         } else {
             info!("Making a new CPIO for {:?}", path);
@@ -171,18 +168,6 @@ impl CpioCache {
         };
 
         Ok(cpio.cloned())
-    }
-
-    async fn get_directory_cached(&self, path: &Path) -> Result<Cpio, CpioError> {
-        let cached_location = CachedPathBuf::new(path.to_path_buf(), &self.cache_dir)?;
-        let cpio = Cpio::new(cached_location.clone())?;
-
-        self.cache
-            .write()
-            .expect("Failed to get a write lock on the cpio cache")
-            .push(path.to_path_buf(), cpio.clone())?;
-
-        Ok(cpio)
     }
 
     async fn make_cpio(&self, path: &Path) -> Result<Cpio, CpioError> {
@@ -265,7 +250,16 @@ impl CpioCache {
                 e: e.error,
             })?;
 
-        self.get_directory_cached(path).await
+        let cached_location = CachedPathBuf::new(path.to_path_buf(), &self.cache_dir)?;
+        let store_path = NixStorePath::from_cached(&cached_location, &self.cache_dir)?;
+        let cpio = Cpio::new(cached_location)?;
+
+        self.cache
+            .write()
+            .expect("Failed to get a write lock on the cpio cache")
+            .push(store_path, cpio.clone())?;
+
+        Ok(cpio)
     }
 }
 
