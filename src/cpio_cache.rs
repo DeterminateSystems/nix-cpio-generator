@@ -5,14 +5,10 @@ use std::sync::{Arc, RwLock};
 use log::{info, trace};
 use lru::LruCache;
 use tempfile::NamedTempFile;
-use tokio::fs::File;
-use tokio::io::BufReader;
 use tokio::sync::Semaphore;
-use tokio_util::io::ReaderStream;
 
 use crate::cpio::{make_archive_from_dir, make_registration};
-
-pub const SIZE_EPSILON_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2 GiB
+use crate::opened_cpio::OpenedCpio;
 
 #[derive(Clone)]
 pub struct CpioCache {
@@ -78,7 +74,7 @@ impl CpioLruCache {
     }
 
     fn prune_lru(&mut self) -> Result<(), CpioError> {
-        while self.current_size_in_bytes > self.max_size_in_bytes + SIZE_EPSILON_BYTES {
+        while self.current_size_in_bytes > self.max_size_in_bytes {
             self.prune_single_lru()?;
         }
 
@@ -88,8 +84,16 @@ impl CpioLruCache {
     fn push(&mut self, path: NixStorePath, cpio: Cpio) -> Result<(), CpioError> {
         let cpio_size = cpio.size;
 
-        while cpio_size + self.current_size_in_bytes > self.max_size_in_bytes {
-            self.prune_single_lru()?;
+        // Ensure we are still below (or at) the max cache size.
+        self.prune_lru()?;
+
+        // This branch is necessary, or else setting a max cache size of e.g. 0 will loop here
+        // infinitely (since the CPIOs aren't 0 bytes large, and 1 + 0 > 0).
+        if cpio_size < self.max_size_in_bytes {
+            // Ensure pushing this CPIO will not exceed the max cache size.
+            while cpio_size + self.current_size_in_bytes > self.max_size_in_bytes {
+                self.prune_single_lru()?;
+            }
         }
 
         if let Some((_path, replaced_cpio)) = self.lru_cache.push(path, cpio) {
@@ -159,14 +163,26 @@ impl CpioCache {
         })
     }
 
-    pub async fn dump_cpio(&self, path: PathBuf) -> Result<Cpio, CpioError> {
-        if let Some(cpio) = self.get_cached(&path)? {
+    pub async fn dump_cpio(&self, path: PathBuf) -> Result<OpenedCpio, CpioError> {
+        let cpio = if let Some(cpio) = self.get_cached(&path)? {
             trace!("Found CPIO in the cache {:?}", path);
-            Ok(cpio)
+            cpio
         } else {
             info!("Making a new CPIO for {:?}", path);
-            self.make_cpio(&path).await
-        }
+            self.make_cpio(&path).await?
+        };
+
+        // Get a handle to the CPIO...
+        let cpio = OpenedCpio::new(cpio.path, cpio.size);
+
+        // ...and then prune the LRU to ensure we're not over the max cache size.
+        // The order is important, so we don't prune the CPIO file before we have a handle to it.
+        self.cache
+            .write()
+            .expect("Failed to get a write lock on the cpio cache (for LRU pruning)")
+            .prune_lru()?;
+
+        cpio
     }
 
     fn get_cached(&self, path: &Path) -> Result<Option<Cpio>, CpioError> {
@@ -291,7 +307,7 @@ impl CpioCache {
 }
 
 #[derive(Debug, Clone)]
-pub struct CachedPathBuf(PathBuf);
+pub struct CachedPathBuf(pub PathBuf);
 
 impl CachedPathBuf {
     pub fn new(src: PathBuf, cache_dir: &Path) -> Result<Self, CpioError> {
@@ -347,22 +363,8 @@ impl Cpio {
         })
     }
 
-    pub fn size(&self) -> u64 {
-        self.size
-    }
-
     pub fn path(&self) -> &Path {
         &self.path.0
-    }
-
-    pub async fn reader_stream(
-        mut self,
-    ) -> std::io::Result<ReaderStream<tokio::io::BufReader<tokio::fs::File>>> {
-        Ok(ReaderStream::new(BufReader::new(self.handle().await?)))
-    }
-
-    async fn handle(&mut self) -> std::io::Result<tokio::fs::File> {
-        File::open(&self.path()).await
     }
 }
 
