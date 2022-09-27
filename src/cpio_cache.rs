@@ -392,3 +392,40 @@ pub enum CpioError {
     #[error("Failed to strip cache prefix")]
     StripCachePrefix(std::path::StripPrefixError),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // This test is ignored by default because it will only succeed from inside of the nix dev shell
+    // that provides the zstd and cpio tools, as well as the CPIO_TEST_CLOSURE environment variable.
+    #[ignore]
+    #[tokio::test]
+    async fn cpio_cache_0_max_bytes() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cpio_cache = CpioCache::new(temp_dir.path().to_owned(), None, 0).unwrap();
+        let cpio = cpio_cache
+            .make_cpio(&PathBuf::from(env!("CPIO_TEST_CLOSURE")))
+            .await
+            .unwrap();
+
+        let mut command = std::process::Command::new("sh");
+        command.args(["-c", "zstdcat \"$1\" | cpio -div", "--"]);
+        command.arg(cpio.path());
+        command.current_dir(temp_dir.path());
+
+        let stderr = &command.output().unwrap().stderr;
+        let path_part = std::str::from_utf8(stderr).unwrap().lines().nth(0).unwrap();
+        assert!(env!("CPIO_TEST_CLOSURE").contains(path_part));
+
+        let extracted_path = temp_dir.path().join(path_part);
+        let out = std::fs::read_to_string(extracted_path).unwrap();
+        assert_eq!(out, "Hello, CPIO!\n");
+
+        cpio_cache.cache.write().unwrap().prune_lru().unwrap();
+
+        assert_eq!(cpio_cache.cache.read().unwrap().lru_cache.len(), 0);
+        assert_eq!(cpio_cache.cache.read().unwrap().max_size_in_bytes, 0);
+        assert_eq!(cpio_cache.cache.read().unwrap().current_size_in_bytes, 0);
+    }
+}

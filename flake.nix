@@ -24,6 +24,10 @@
     in
     {
       devShell = forAllSystems ({ system, pkgs, ... }: self.packages.${system}.package.overrideAttrs ({ nativeBuildInputs ? [ ], ... }: {
+        CPIO_TEST_CLOSURE = pkgs.runCommand "test-closure" { buildInputs = [ pkgs.hello ]; } ''
+          hello --greeting='Hello, CPIO!' > $out
+        '';
+
         nativeBuildInputs = nativeBuildInputs ++ (with pkgs; [
           binwalk
           codespell
@@ -35,6 +39,7 @@
           vim # xxd
           cpiotools.packages.${system}.package
           cargo
+          zstd
         ]);
       }));
 
