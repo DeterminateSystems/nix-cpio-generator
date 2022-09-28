@@ -70,6 +70,8 @@ impl CpioLruCache {
                 })?;
 
                 self.current_size_in_bytes -= cpio.size;
+
+                log::trace!("Removed {:?} ({} bytes)", cpio.path(), cpio.size);
             }
         }
 
