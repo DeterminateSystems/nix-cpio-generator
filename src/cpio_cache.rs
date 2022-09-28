@@ -124,7 +124,7 @@ impl CpioCache {
     ) -> Result<Self, CpioError> {
         let mut cache = CpioLruCache::new(max_cache_size_in_bytes);
 
-        log::info!("enumerating cache dir {:?} to place into lru", cache_dir);
+        log::info!("Enumerating cache dir {:?} to place into lru", cache_dir);
         for entry in std::fs::read_dir(&cache_dir).map_err(|e| CpioError::Fs {
             ctx: "Reading the cache dir",
             path: cache_dir.clone(),
@@ -149,7 +149,7 @@ impl CpioCache {
 
         if cache.current_size_in_bytes > cache.max_size_in_bytes {
             log::info!(
-                "pruning lru cache to be less than max size {} bytes (currently {} bytes)",
+                "Pruning lru cache to be less than max size {} bytes (currently {} bytes)",
                 cache.max_size_in_bytes,
                 cache.current_size_in_bytes,
             );
