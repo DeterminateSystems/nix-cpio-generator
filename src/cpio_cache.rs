@@ -17,6 +17,7 @@ pub struct CpioCache {
     semaphore: Option<Arc<Semaphore>>,
 }
 
+/// A path that exists in the Nix store.
 #[derive(Debug, Hash, PartialEq, Eq)]
 struct NixStorePath(PathBuf);
 
@@ -306,6 +307,7 @@ impl CpioCache {
     }
 }
 
+/// A path that points to a cached CPIO.
 #[derive(Debug, Clone)]
 pub struct CachedPathBuf(pub PathBuf);
 
