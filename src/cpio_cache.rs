@@ -50,6 +50,8 @@ struct CpioLruCache {
 impl CpioLruCache {
     fn new(max_size_in_bytes: u64) -> Self {
         Self {
+            // NOTE: We use an unbounded LruCache because we don't care about the number of items,
+            // but the size of the items on disk (which we need to track ourselves).
             lru_cache: LruCache::unbounded(),
             current_size_in_bytes: 0,
             max_size_in_bytes,
