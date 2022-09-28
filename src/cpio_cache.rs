@@ -1,13 +1,14 @@
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use log::{info, trace};
-use lru::LruCache;
 use tempfile::NamedTempFile;
 use tokio::sync::Semaphore;
 
-use crate::cpio::{make_archive_from_dir, make_registration};
+use crate::cpio::{CachedPathBuf, Cpio};
+use crate::cpio_lru_cache::{CpioLruCache, NixStorePath};
+use crate::cpio_maker::{make_archive_from_dir, make_registration};
+use crate::error::CpioError;
 use crate::opened_cpio::OpenedCpio;
 
 #[derive(Clone)]
@@ -15,108 +16,6 @@ pub struct CpioCache {
     cache_dir: PathBuf,
     cache: Arc<RwLock<CpioLruCache>>,
     semaphore: Option<Arc<Semaphore>>,
-}
-
-/// A path that exists in the Nix store.
-#[derive(Debug, Hash, PartialEq, Eq)]
-struct NixStorePath(PathBuf);
-
-impl NixStorePath {
-    pub fn new(store_path: PathBuf) -> Self {
-        assert!(store_path.starts_with("/nix/store"));
-        NixStorePath(store_path)
-    }
-
-    pub fn from_cached(
-        cached_location: &CachedPathBuf,
-        cache_dir: &PathBuf,
-    ) -> Result<Self, CpioError> {
-        let nix_store = PathBuf::from("/nix/store");
-        let stripped = cached_location
-            .0
-            .strip_prefix(cache_dir)
-            .map_err(CpioError::StripCachePrefix)?;
-        let store_hash_path = stripped.with_extension("").with_extension("");
-
-        Ok(NixStorePath(nix_store.join(store_hash_path)))
-    }
-}
-
-struct CpioLruCache {
-    lru_cache: LruCache<NixStorePath, Cpio>,
-    current_size_in_bytes: u64,
-    max_size_in_bytes: u64,
-}
-
-impl CpioLruCache {
-    fn new(max_size_in_bytes: u64) -> Self {
-        Self {
-            // NOTE: We use an unbounded LruCache because we don't care about the number of items,
-            // but the size of the items on disk (which we need to track ourselves).
-            lru_cache: LruCache::unbounded(),
-            current_size_in_bytes: 0,
-            max_size_in_bytes,
-        }
-    }
-
-    fn prune_single_lru(&mut self) -> Result<(), CpioError> {
-        if let Some((path, cpio)) = self.lru_cache.pop_lru() {
-            if cpio.path().exists() {
-                std::fs::remove_file(&cpio.path()).map_err(|e| CpioError::Io {
-                    ctx: "Removing the LRU CPIO",
-                    src: path.0,
-                    dest: cpio.path().to_path_buf(),
-                    e,
-                })?;
-
-                self.current_size_in_bytes -= cpio.size;
-
-                log::trace!("Removed {:?} ({} bytes)", cpio.path(), cpio.size);
-            }
-        }
-
-        Ok(())
-    }
-
-    fn prune_lru(&mut self) -> Result<(), CpioError> {
-        while self.current_size_in_bytes > self.max_size_in_bytes {
-            self.prune_single_lru()?;
-        }
-
-        Ok(())
-    }
-
-    fn push(&mut self, path: NixStorePath, cpio: Cpio) -> Result<(), CpioError> {
-        let cpio_size = cpio.size;
-
-        // Ensure we are still below (or at) the max cache size.
-        self.prune_lru()?;
-
-        // This branch is necessary, or else setting a max cache size of e.g. 0 will loop here
-        // infinitely (since the CPIOs aren't 0 bytes large, and 1 + 0 > 0).
-        if cpio_size < self.max_size_in_bytes {
-            // Ensure pushing this CPIO will not exceed the max cache size.
-            while cpio_size + self.current_size_in_bytes > self.max_size_in_bytes {
-                self.prune_single_lru()?;
-            }
-        }
-
-        if let Some((_path, replaced_cpio)) = self.lru_cache.push(path, cpio) {
-            self.current_size_in_bytes -= replaced_cpio.size;
-        }
-
-        self.current_size_in_bytes += cpio_size;
-
-        Ok(())
-    }
-
-    fn get(&mut self, path: &NixStorePath) -> Option<&Cpio> {
-        self.lru_cache.get(path)
-    }
-
-    fn demote(&mut self, path: &NixStorePath) {
-        self.lru_cache.demote(path)
-    }
 }
 
 impl CpioCache {
@@ -307,102 +206,6 @@ impl CpioCache {
 
         Ok(cpio)
     }
-}
-
-/// A path that points to a cached CPIO.
-#[derive(Debug, Clone)]
-pub struct CachedPathBuf(pub PathBuf);
-
-impl CachedPathBuf {
-    pub fn new(src: PathBuf, cache_dir: &Path) -> Result<Self, CpioError> {
-        let cached_path =
-            if let Some(std::path::Component::Normal(pathname)) = src.components().last() {
-                let mut cache_name = OsString::from(pathname);
-                cache_name.push(".cpio.zstd");
-
-                Ok(cache_dir.join(cache_name))
-            } else {
-                Err(CpioError::Uncachable(format!(
-                    "Cannot calculate a cache path for: {:?}",
-                    src
-                )))
-            };
-
-        cached_path.map(CachedPathBuf)
-    }
-
-    /// This function assumes the passed PathBuf already exists in the cache.
-    pub fn new_preexisting(src: PathBuf) -> Self {
-        CachedPathBuf(src)
-    }
-}
-
-#[derive(Debug)]
-pub struct Cpio {
-    size: u64,
-    path: CachedPathBuf,
-}
-
-impl Clone for Cpio {
-    fn clone(&self) -> Self {
-        Cpio {
-            size: self.size,
-            path: self.path.clone(),
-        }
-    }
-}
-
-impl Cpio {
-    pub fn new(path: CachedPathBuf) -> Result<Self, CpioError> {
-        let metadata = std::fs::metadata(&path.0).map_err(|e| CpioError::Fs {
-            ctx: "Reading the CPIO's file metadata",
-            path: path.0.clone(),
-            e,
-        })?;
-
-        Ok(Self {
-            size: metadata.len(),
-            path,
-        })
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path.0
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum CpioError {
-    #[error("A filesystem error")]
-    Fs {
-        ctx: &'static str,
-        path: PathBuf,
-        #[source]
-        e: std::io::Error,
-    },
-
-    #[error("An IO error")]
-    Io {
-        ctx: &'static str,
-        src: PathBuf,
-        dest: PathBuf,
-        #[source]
-        e: std::io::Error,
-    },
-
-    #[error("Generating the Nix DB registration failed")]
-    RegistrationError(crate::cpio::MakeRegistrationError),
-
-    #[error(
-        "The path we tried to generate a cache for can't turn in to a cache key for some reason"
-    )]
-    Uncachable(String),
-
-    #[error("failed to acquire a semaphore")]
-    Semaphore(tokio::sync::AcquireError),
-
-    #[error("Failed to strip cache prefix")]
-    StripCachePrefix(std::path::StripPrefixError),
 }
 
 #[cfg(test)]
