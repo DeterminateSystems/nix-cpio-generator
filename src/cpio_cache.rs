@@ -63,8 +63,8 @@ impl CpioLruCache {
             if cpio.path().exists() {
                 std::fs::remove_file(&cpio.path()).map_err(|e| CpioError::Io {
                     ctx: "Removing the LRU CPIO",
-                    src: Some(path.0),
-                    dest: Some(cpio.path().to_path_buf()),
+                    src: path.0,
+                    dest: cpio.path().to_path_buf(),
                     e,
                 })?;
 
@@ -125,16 +125,14 @@ impl CpioCache {
         let mut cache = CpioLruCache::new(max_cache_size_in_bytes);
 
         log::info!("enumerating cache dir {:?} to place into lru", cache_dir);
-        for entry in std::fs::read_dir(&cache_dir).map_err(|e| CpioError::Io {
+        for entry in std::fs::read_dir(&cache_dir).map_err(|e| CpioError::Fs {
             ctx: "Reading the cache dir",
-            src: None,
-            dest: Some(cache_dir.clone()),
+            path: cache_dir.clone(),
             e,
         })? {
-            let entry = entry.map_err(|e| CpioError::Io {
+            let entry = entry.map_err(|e| CpioError::Fs {
                 ctx: "Reading cache dir entry",
-                src: None,
-                dest: None,
+                path: cache_dir.clone(),
                 e,
             })?;
             let path = entry.path();
@@ -228,8 +226,8 @@ impl CpioCache {
         let final_dest = CachedPathBuf::new(path.to_path_buf(), &self.cache_dir)?;
         let temp_dest = NamedTempFile::new_in(&self.cache_dir).map_err(|e| CpioError::Io {
             ctx: "Creating a new named temporary file.",
-            src: Some(path.to_path_buf()),
-            dest: Some(final_dest.0.clone()),
+            src: path.to_path_buf(),
+            dest: final_dest.0.clone(),
             e,
         })?;
 
@@ -241,14 +239,14 @@ impl CpioCache {
         );
 
         let tdf = temp_dest.as_file().try_clone().unwrap();
-        let insidedest = temp_dest.path().to_path_buf();
-        let insidepath = path.to_path_buf();
+        let inside_dest = temp_dest.path().to_path_buf();
+        let inside_path = path.to_path_buf();
 
         let mut compressor =
             zstd::stream::write::Encoder::new(tdf, 10).map_err(|e| CpioError::Io {
                 ctx: "Instantiating the zstd write-stream encoder",
-                src: Some(insidepath.clone()),
-                dest: Some(insidedest.clone()),
+                src: inside_path.clone(),
+                dest: inside_dest.clone(),
                 e,
             })?;
 
@@ -256,17 +254,17 @@ impl CpioCache {
             .include_checksum(true)
             .map_err(|e| CpioError::Io {
                 ctx: "Including checksums",
-                src: Some(insidepath.clone()),
-                dest: Some(insidedest.clone()),
+                src: inside_path.clone(),
+                dest: inside_dest.clone(),
                 e,
             })?;
 
         let mut compressor = tokio::task::spawn_blocking(move || -> Result<_, CpioError> {
-            make_archive_from_dir(Path::new("/"), &insidepath, &mut compressor).map_err(|e| {
+            make_archive_from_dir(Path::new("/"), &inside_path, &mut compressor).map_err(|e| {
                 CpioError::Io {
                     ctx: "Constructing a CPIO",
-                    src: Some(insidepath),
-                    dest: Some(insidedest),
+                    src: inside_path,
+                    dest: inside_dest,
                     e,
                 }
             })?;
@@ -281,8 +279,8 @@ impl CpioCache {
             .map_err(CpioError::RegistrationError)?;
         compressor.finish().map_err(|e| CpioError::Io {
             ctx: "Finishing the zstd write-stream encoder",
-            src: Some(path.to_path_buf()),
-            dest: Some(temp_dest.path().to_path_buf()),
+            src: path.to_path_buf(),
+            dest: temp_dest.path().to_path_buf(),
             e,
         })?;
 
@@ -290,8 +288,8 @@ impl CpioCache {
             .persist(&final_dest.0)
             .map_err(|e| CpioError::Io {
                 ctx: "Persisting the temporary file to the final location.",
-                src: Some(path.to_path_buf()),
-                dest: Some(final_dest.0.clone()),
+                src: path.to_path_buf(),
+                dest: final_dest.0.clone(),
                 e: e.error,
             })?;
 
@@ -352,10 +350,9 @@ impl Clone for Cpio {
 
 impl Cpio {
     pub fn new(path: CachedPathBuf) -> Result<Self, CpioError> {
-        let metadata = std::fs::metadata(&path.0).map_err(|e| CpioError::Io {
+        let metadata = std::fs::metadata(&path.0).map_err(|e| CpioError::Fs {
             ctx: "Reading the CPIO's file metadata",
-            src: None,
-            dest: Some(path.0.clone()),
+            path: path.0.clone(),
             e,
         })?;
 
@@ -372,11 +369,20 @@ impl Cpio {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CpioError {
+    #[error("A filesystem error")]
+    Fs {
+        ctx: &'static str,
+        path: PathBuf,
+        #[source]
+        e: std::io::Error,
+    },
+
     #[error("An IO error")]
     Io {
         ctx: &'static str,
-        src: Option<PathBuf>,
-        dest: Option<PathBuf>,
+        src: PathBuf,
+        dest: PathBuf,
+        #[source]
         e: std::io::Error,
     },
 

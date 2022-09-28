@@ -14,10 +14,9 @@ pub struct OpenedCpio {
 
 impl OpenedCpio {
     pub fn new(path: CachedPathBuf, size: u64) -> Result<Self, CpioError> {
-        let file = std::fs::File::open(&path.0).map_err(|e| CpioError::Io {
+        let file = std::fs::File::open(&path.0).map_err(|e| CpioError::Fs {
             ctx: "Failed to open CPIO file",
-            src: Some(path.0.clone()),
-            dest: None,
+            path: path.0.clone(),
             e,
         })?;
 
