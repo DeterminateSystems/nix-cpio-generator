@@ -4,7 +4,8 @@ use tokio::fs::File;
 use tokio::io::BufReader;
 use tokio_util::io::ReaderStream;
 
-use crate::cpio_cache::{CachedPathBuf, CpioError};
+use crate::cpio::CachedPathBuf;
+use crate::error::CpioError;
 
 pub struct OpenedCpio {
     size: u64,

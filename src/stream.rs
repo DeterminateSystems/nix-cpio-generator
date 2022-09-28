@@ -5,8 +5,8 @@ use std::path::Path;
 
 use log::{error, info, trace, warn};
 
-use crate::cpio::{make_load_cpio, LEADER_CPIO_BYTES, LEADER_CPIO_LEN};
 use crate::cpio_cache::CpioCache;
+use crate::cpio_maker::{make_load_cpio, LEADER_CPIO_BYTES, LEADER_CPIO_LEN};
 use crate::nix::get_closure_paths;
 
 pub async fn stream(
