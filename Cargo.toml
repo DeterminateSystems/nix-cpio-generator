@@ -8,8 +8,9 @@ documentation = "https://github.com/DeterminateSystems/nix-cpio-generator/"
 homepage = "https://github.com/DeterminateSystems/nix-cpio-generator/"
 repository = "https://github.com/DeterminateSystems/nix-cpio-generator/"
 
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = ["pinned"]
+pinned = []
 
 [dependencies]
 bytes = "1.1.0"
