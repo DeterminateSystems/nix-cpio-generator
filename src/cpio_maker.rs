@@ -266,7 +266,44 @@ mod tests {
     }
 
     #[test]
-    fn test_root_symlink_todirectory() -> Result<(), Box<dyn Error>> {
+    fn test_directory() -> Result<(), Box<dyn Error>> {
+        let root_handle = tempfile::tempdir().unwrap();
+
+        let root = root_handle.path();
+        let test_cpio = root.join("test.cpio");
+        let dest = root.join("dest");
+        {
+            // setup the destination
+            create_dir(&dest).unwrap();
+            write!(File::create(dest.join("a-file")).unwrap(), "hi").unwrap();
+        }
+
+        make_archive_from_dir(&root, &dest, File::create(&test_cpio).unwrap()).unwrap();
+
+        let mut cpio_handle = File::open(&test_cpio).unwrap();
+
+        let entry = cpio::newc::Reader::new(&mut cpio_handle).unwrap();
+        assert_eq!(entry.entry().name(), "dest");
+        let mut cpio_handle = entry.finish().unwrap();
+
+        let entry = cpio::newc::Reader::new(&mut cpio_handle).unwrap();
+        assert_eq!(entry.entry().name(), "dest/a-file");
+        let mut cpio_handle = entry.finish().unwrap();
+
+        let entry = cpio::newc::Reader::new(&mut cpio_handle).unwrap();
+        assert_eq!(entry.entry().name(), "TRAILER!!!");
+        let mut cpio_handle = entry.finish().unwrap();
+
+        match cpio::newc::Reader::new(&mut cpio_handle) {
+            Ok(v) => panic!("Expected an err, got an entry: {:#?}", v.entry().name()),
+            Err(_) => {}
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_root_symlink_to_directory() -> Result<(), Box<dyn Error>> {
         let root_handle = tempfile::tempdir().unwrap();
 
         let root = root_handle.path();
