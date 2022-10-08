@@ -65,7 +65,12 @@ where
 
             Some((built, readable_file))
         });
-    write_cpio(dir, out)?;
+
+    if path.is_symlink() {
+        write_cpio(dir.take(1), out)?;
+    } else {
+        write_cpio(dir, out)?;
+    }
     Ok(())
 }
 
@@ -223,8 +228,9 @@ lazy_static! {
 mod tests {
     use std::{
         error::Error,
-        fs::{read_to_string, remove_file, File},
+        fs::{create_dir, read_to_string, remove_file, File},
         io::Write,
+        os::unix::fs::symlink,
         process::Command,
     };
     use tempfile::NamedTempFile;
@@ -256,6 +262,41 @@ mod tests {
         let read_text = read_to_string(file.path())?;
         assert_eq!(read_text, "Hello cpio!");
         remove_file(archive.path())?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_root_symlink_todirectory() -> Result<(), Box<dyn Error>> {
+        let root_handle = tempfile::tempdir().unwrap();
+
+        let root = root_handle.path();
+        let test_cpio = root.join("test.cpio");
+        let source = root.join("source");
+        let dest = root.join("dest");
+        {
+            // setup the destination
+            create_dir(&dest).unwrap();
+            write!(File::create(dest.join("a-file")).unwrap(), "hi").unwrap();
+        }
+        symlink(&dest, &source).unwrap();
+
+        make_archive_from_dir(&root, &source, File::create(&test_cpio).unwrap()).unwrap();
+
+        let mut cpio_handle = File::open(&test_cpio).unwrap();
+
+        let entry = cpio::newc::Reader::new(&mut cpio_handle).unwrap();
+        assert_eq!(entry.entry().name(), "source");
+        let mut cpio_handle = entry.finish().unwrap();
+
+        let entry = cpio::newc::Reader::new(&mut cpio_handle).unwrap();
+        assert_eq!(entry.entry().name(), "TRAILER!!!");
+        let mut cpio_handle = entry.finish().unwrap();
+
+        match cpio::newc::Reader::new(&mut cpio_handle) {
+            Ok(v) => panic!("Expected an err, got an entry: {:#?}", v.entry().name()),
+            Err(_) => {}
+        }
+
         Ok(())
     }
 }
