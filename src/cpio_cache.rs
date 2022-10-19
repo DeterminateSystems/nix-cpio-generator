@@ -126,12 +126,13 @@ impl CpioCache {
         };
 
         let final_dest = CachedPathBuf::new(path.to_path_buf(), &self.cache_dir)?;
-        let temp_dest = NamedTempFile::new_in(&self.cache_dir).map_err(|e| CpioError::Io {
-            ctx: "Creating a new named temporary file.",
-            src: path.to_path_buf(),
-            dest: final_dest.0.clone(),
-            e,
-        })?;
+        let temp_dest =
+            NamedTempFile::new_in_respecting_umask(&self.cache_dir).map_err(|e| CpioError::Io {
+                ctx: "Creating a new named temporary file.",
+                src: path.to_path_buf(),
+                dest: final_dest.0.clone(),
+                e,
+            })?;
 
         trace!(
             "Constructing CPIO for {:?} at {:?}, to be moved to {:?}",

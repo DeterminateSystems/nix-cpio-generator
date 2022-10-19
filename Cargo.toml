@@ -26,3 +26,6 @@ tokio-stream = { version = "0.1.7", features = [ "io-util" ] }
 tokio-util = { version = "0.6.7", features = [ "io" ] }
 walkdir = "2"
 zstd = "0.11"
+
+[patch.crates-io]
+tempfile = { git = "https://github.com/DeterminateSystems/tempfile", branch = "namedtempfile-respects-umask" }
