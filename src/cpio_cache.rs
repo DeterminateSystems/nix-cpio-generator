@@ -1,3 +1,4 @@
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
@@ -197,6 +198,15 @@ impl CpioCache {
 
         let store_path = NixStorePath::new(path.to_path_buf());
         let cached_location = CachedPathBuf::new(path.to_path_buf(), &self.cache_dir)?;
+
+        tokio::fs::set_permissions(&cached_location.0, std::fs::Permissions::from_mode(0o444))
+            .await
+            .map_err(|e| CpioError::Fs {
+                ctx: "Failed to set mode for cached file to 0o444",
+                path: cached_location.0.clone(),
+                e,
+            })?;
+
         let cpio = Cpio::new(cached_location)?;
 
         self.cache
